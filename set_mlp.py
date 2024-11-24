@@ -562,17 +562,15 @@ def load_data(filename, test_size, folder="imputed_data"):
     # Load the data
     if dataset == "spam":
         # Get the features from the imputed data
-        imputed_data = pd.read_csv(os.path.join(folder, filename),
-                                   header=None)  # use 'header=none' if using reference data
-        x = imputed_data.iloc[:, :-1]  # use '.iloc[:, :-1]' if using reference data
+        imputed_data = pd.read_csv(os.path.join(folder, filename))  # use 'header=none' if using reference data
+        x = imputed_data.iloc[:, :]  # use '.iloc[:, :-1]' if using reference data
         # Get the labels from the reference data
         data = pd.read_csv("data/spam.csv", header=None)
         y = data.iloc[:, -1]
     elif dataset == "letter":
         # Get the features from the imputed data
-        imputed_data = pd.read_csv(os.path.join(folder, filename),
-                                   header=None)  # use 'header=none' if using reference data
-        x = imputed_data.iloc[:, 1:]  # use '.iloc[:, 1:]' if using reference data
+        imputed_data = pd.read_csv(os.path.join(folder, filename))  # use 'header=none' if using reference data
+        x = imputed_data.iloc[:, :]  # use '.iloc[:, 1:]' if using reference data
         # Get the labels from the reference data
         data = pd.read_csv("data/letter.csv", header=None)
         y = data.iloc[:, 0]
