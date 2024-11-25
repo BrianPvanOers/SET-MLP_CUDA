@@ -129,15 +129,13 @@ def array_intersect(a, b):
     return np.in1d(a.view(dtype), b.view(dtype))  # boolean return
 
 
-def back_prop_CUDA(a, delta, rows, cols, out):
+def back_prop_CUDA(a, delta, rows_d, cols_d, out):
     # kernel parameters
-    threadsperblock = 512
+    threadsperblock = 16
     blockspergrid = (out.size + (threadsperblock - 1))
     # backpropagation using CUDA
     a_d = cuda.to_device(a)
     delta_d = cuda.to_device(delta)
-    rows_d = cuda.to_device(rows)
-    cols_d = cuda.to_device(cols)
     data_d = cuda.to_device(out)
 
     backpropagation_updates_numpy_CUDA[blockspergrid, threadsperblock](a_d, delta_d, rows_d, cols_d, data_d)
@@ -193,6 +191,16 @@ class SET_MLP:
             self.b[i + 1] = np.zeros(dimensions[i + 1], dtype='float32')
             self.activations[i + 2] = activations[i]
 
+        # Overhead reduction variables for CUDA
+        self.init = True
+        self.rows_d1 = None
+        self.cols_d1 = None
+        
+        self.new_epoch = [True] * self.n_layers
+        self.rows_d2 = [None] * self.n_layers
+        self.cols_d2 = [None] * self.n_layers
+
+
     def _feed_forward(self, x, drop=False):
         """
         Execute a forward feed through the network.
@@ -245,7 +253,13 @@ class SET_MLP:
         # compute backpropagation updates
         # backpropagation_updates_numpy(a[self.n_layers - 1], delta, dw.row, dw.col, dw.data)
         # CUDA (enable this to run on GPU)
-        dw.data = back_prop_CUDA(a[self.n_layers - 1], delta, dw.row, dw.col, dw.data)
+        # Update and send rows and cols to device on initialization only to reduce overhead.
+        if self.init:
+            self.rows_d = cuda.to_device(dw.row)
+            self.cols_d = cuda.to_device(dw.col)
+            self.init = False
+
+        dw.data = back_prop_CUDA(a[self.n_layers - 1], delta, self.rows_d, self.cols_d, dw.data)
 
         update_params = {
             self.n_layers - 1: (dw.tocsr(), np.mean(delta, axis=0))
@@ -268,7 +282,13 @@ class SET_MLP:
             # compute backpropagation updates
             # backpropagation_updates_numpy(a[i - 1], delta, dw.row, dw.col, dw.data)
             # CUDA (enable this to run on GPU)
-            dw.data = back_prop_CUDA(a[i - 1], delta, dw.row, dw.col, dw.data)
+            # Update and send rows and cols to device on new epoch only to reduce overhead.
+            if self.new_epoch[i]:
+                self.rows_d2[i] = cuda.to_device(dw.row)
+                self.cols_d2[i] = cuda.to_device(dw.col)
+                self.new_epoch[i] = False
+
+            dw.data = back_prop_CUDA(a[i - 1], delta, self.rows_d2[i], self.cols_d2[i], dw.data)
 
             update_params[i - 1] = (dw.tocsr(), np.mean(delta, axis=0))
         for k, v in update_params.items():
@@ -323,6 +343,9 @@ class SET_MLP:
         metrics = np.zeros((epochs, 4))
 
         for i in range(epochs):
+            # Set new_epoch to true
+            self.new_epoch = [True] * self.n_layers
+
             # Shuffle the data
             seed = np.arange(x.shape[0])
             np.random.shuffle(seed)
@@ -621,7 +644,7 @@ if __name__ == "__main__":
             no_hidden_neurons_layer = 1000
             epsilon = 13  # set the sparsity level
             zeta = 0.3  # in [0..1]. It gives the percentage of unimportant connections which are removed and replaced with random ones after every epoch
-            no_training_epochs = 400
+            no_training_epochs = 50  # 50 epochs has a performance loss of <5% compared to the default 400, but speeds things up drastically.
             batch_size = 40
             dropout_rate = 0.2
             learning_rate = 0.05
